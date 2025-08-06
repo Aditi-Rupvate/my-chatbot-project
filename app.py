@@ -20,46 +20,38 @@ CHEATSHEET_PATH = "downloads"
 os.makedirs(TEMP_STORAGE_PATH, exist_ok=True)
 os.makedirs(CHEATSHEET_PATH, exist_ok=True)
 
-# --- Backend Components ---
+# --- Backend Components (Unchanged) ---
 embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=GOOGLE_API_KEY)
 llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.3, google_api_key=GOOGLE_API_KEY)
 
-# --- PDF Generation Class (Unchanged) ---
+# --- PDF Generation Class and Function (Unchanged) ---
 class PDF(FPDF):
     def __init__(self, topic, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.topic = topic
-
     def header(self):
         self.set_font("DejaVu", "B", 9)
         self.set_text_color(128, 128, 128)
         self.cell(0, 10, f"Ophthalmology Cheatsheet: {self.topic.title()}", 0, 0, 'L')
         self.ln(10)
-
     def footer(self):
         self.set_y(-15)
         self.set_font("DejaVu", "", 8)
         self.set_text_color(128, 128, 128)
         self.cell(0, 10, f"Page {self.page_no()}/{{nb}}", 0, 0, 'C')
 
-# --- CORRECTED PDF Function ---
 def create_formatted_pdf(text_content: str, topic: str) -> str:
     pdf = PDF(topic)
-    
-    # --- FIX: Load fonts BEFORE creating the first page ---
     try:
         pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
         pdf.add_font("DejaVu", "B", "DejaVuSans-Bold.ttf", uni=True)
     except RuntimeError:
-        st.error("Could not find 'DejaVuSans.ttf' or 'DejaVuSans-Bold.ttf'. Please ensure they are in the root folder.")
+        st.error("Could not find 'DejaVuSans.ttf' or 'DejaVuSans-Bold.ttf'.")
         return ""
-
     pdf.alias_nb_pages()
-    pdf.add_page() # This is now safe, as it will call the header with fonts loaded
+    pdf.add_page()
     pdf.set_margins(15, 15, 15)
     pdf.set_auto_page_break(auto=True, margin=20)
-
-    # --- Main Title ---
     pdf.set_font("DejaVu", "B", 20)
     pdf.set_text_color(40, 40, 40)
     pdf.cell(0, 10, f"Cheatsheet: {topic.title()}", 0, 1, 'C')
@@ -67,8 +59,6 @@ def create_formatted_pdf(text_content: str, topic: str) -> str:
     pdf.set_draw_color(200, 200, 200)
     pdf.line(pdf.get_x(), pdf.get_y(), pdf.get_x() + 180, pdf.get_y())
     pdf.ln(10)
-
-    # --- Body Content ---
     line_height = 7
     pdf.set_text_color(50, 50, 50)
     for line in text_content.split('\n'):
@@ -88,8 +78,6 @@ def create_formatted_pdf(text_content: str, topic: str) -> str:
             pdf.set_font("DejaVu", "", 11)
             pdf.multi_cell(0, line_height, line)
             pdf.ln(3)
-
-    # Generate a user-friendly filename
     clean_topic = re.sub(r'[\W_]+', '_', topic).lower()
     filename = f"{clean_topic}_cheatsheet.pdf"
     filepath = os.path.join(CHEATSHEET_PATH, filename)
@@ -98,14 +86,13 @@ def create_formatted_pdf(text_content: str, topic: str) -> str:
 
 # --- Main Query Logic (Unchanged) ---
 def handle_query_logic(query: str, session_id: str = None):
+    # This function remains the same
     if session_id:
         temp_db_path = os.path.join(TEMP_STORAGE_PATH, session_id)
-        if not os.path.exists(temp_db_path):
-            return "Error: Your document session has expired. Please upload the document again.", None
+        if not os.path.exists(temp_db_path): return "Error: Your document session has expired.", None
         db = FAISS.load_local(temp_db_path, embeddings, allow_dangerous_deserialization=True)
     else:
-        if not os.path.exists(FAISS_INDEX_PATH):
-             return "Error: The default knowledge base is not available. Upload a document to begin.", None
+        if not os.path.exists(FAISS_INDEX_PATH): return "Error: Default knowledge base not available.", None
         db = FAISS.load_local(FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
     retriever = db.as_retriever(search_type="similarity", search_kwargs={"k": 5})
     @tool
@@ -139,13 +126,14 @@ def handle_query_logic(query: str, session_id: str = None):
     if 'intermediate_steps' in response:
         for _, observation in response['intermediate_steps']:
             if isinstance(observation, str) and observation.startswith("PDF_GENERATED::"):
-                try:
-                    pdf_filename = observation.split("::")[1]
+                try: pdf_filename = observation.split("::")[1]
                 except IndexError: pass
     return final_answer, pdf_filename
 
-# --- Streamlit UI (Unchanged) ---
+# --- Streamlit UI ---
 st.set_page_config(layout="centered")
+
+# --- Theme Dictionaries & Session State (Unchanged) ---
 LIGHT = { "bg": "#f8fafb", "bar": "#fff", "bot": "#e9eef6", "user": "#d1e7dd", "text": "#191b22", "input": "#e8edf2", "border": "#d4dde7", "expander": "#f4f7fb" }
 DARK = { "bg": "#18181c", "bar": "#202126", "bot": "#232733", "user": "#22577a", "text": "#f3f5f8", "input": "#242730", "border": "#26282f", "expander": "#24272e" }
 if "theme" not in st.session_state: st.session_state["theme"] = "dark"
@@ -153,25 +141,57 @@ if "chat_history" not in st.session_state: st.session_state["chat_history"] = []
 if "session_id" not in st.session_state: st.session_state["session_id"] = None
 if "active_doc_name" not in st.session_state: st.session_state["active_doc_name"] = None
 THEME = DARK if st.session_state["theme"] == "dark" else LIGHT
+
+# --- IMPROVED: Custom CSS for Responsive Top Bar ---
 st.markdown(f"""
 <style>
     .stApp {{ background: {THEME['bg']}; color: {THEME['text']}; }}
-    .topbar-custom {{ background: {THEME['bar']}; border-radius: 16px; padding: 1.3em 1.2em 1.15em 2.1em; margin-bottom: 1.6em; box-shadow: 0 2px 12px 0 rgba(44,46,66,0.06); font-size: 1.55rem; font-weight: 800; letter-spacing: .02em; }}
+    .topbar-custom {{
+        background: {THEME['bar']};
+        border-radius: 16px;
+        padding: 1em 1.2em; /* Adjusted padding */
+        font-size: 1.55rem;
+        font-weight: 800;
+        letter-spacing: .02em;
+        box-shadow: 0 2px 12px 0 rgba(44,46,66,0.06);
+    }}
     .msg-user {{ background: {THEME['user']}; color: {THEME['text']}; border-radius: 16px 16px 4px 20px; margin-bottom: 0.3em; padding: 1em 1.35em; width: fit-content; max-width: 85%; font-size: 1.13rem; border: 1.5px solid {THEME['border']}; margin-left: auto; margin-right: 0; text-align: right; box-shadow: 0 1px 12px 0 rgba(55,96,148,0.05); word-break: break-word; }}
     .msg-bot {{ background: {THEME['bot']}; color: {THEME['text']}; border-radius: 16px 16px 20px 4px; margin-bottom: 0.7em; padding: 1.08em 1.23em 1em 1.18em; width: fit-content; max-width: 85%; font-size: 1.13rem; border: 1.5px solid {THEME['border']}; margin-right: auto; margin-left: 0; text-align: left; box-shadow: 0 1px 12px 0 rgba(44,46,66,0.05); word-break: break-word; }}
     [data-testid="stExpander"] {{ border-color: {THEME['border']}; background: {THEME['expander']}; }}
     .stButton>button, .stDownloadButton>button {{ border: 1px solid {THEME['border']}; }}
-    @media (max-width: 768px) {{ .topbar-custom {{ font-size: 1.2rem; padding: 1em; text-align: center; }} .msg-user, .msg-bot {{ font-size: 0.95rem; max-width: 90%; }} }}
+
+    /* Mobile Responsive Styles */
+    @media (max-width: 768px) {{
+        .topbar-custom {{ font-size: 1.2rem; padding: 0.8em; }}
+        .msg-user, .msg-bot {{ font-size: 0.95rem; max-width: 90%; }}
+        /* Ensure columns in the top bar have vertical alignment */
+        [data-testid="stHorizontalBlock"] {{
+            align-items: center;
+        }}
+    }}
 </style>
 """, unsafe_allow_html=True)
-col1, col2, col3 = st.columns([8, 1, 1])
-with col1: st.markdown("<div class='topbar-custom'>Ophthalmology AI Assistant</div>", unsafe_allow_html=True)
-with col2:
-    
-    if st.button("☀️", key="theme-sun", help="Switch to light mode"): st.session_state["theme"] = "light"; st.rerun()
-    if st.button("🌙", key="theme-moon", help="Switch to dark mode"): st.session_state["theme"] = "dark"; st.rerun()
-        
 
+# --- IMPROVED: Responsive Top Bar Layout ---
+# This new structure is more robust for mobile screens.
+main_container = st.container()
+with main_container:
+    col1, col2 = st.columns([5, 2], gap="medium") # Give more space to title
+    with col1:
+        st.markdown("<div class='topbar-custom'>Ophthalmology AI Assistant</div>", unsafe_allow_html=True)
+    with col2:
+        # Nest columns for the buttons to keep them tight
+        btn_col1, btn_col2 = st.columns(2)
+        with btn_col1:
+            if st.button("☀️", key="theme-sun", help="Switch to light mode", use_container_width=True):
+                st.session_state["theme"] = "light"; st.rerun()
+        with btn_col2:
+            if st.button("🌙", key="theme-moon", help="Switch to dark mode", use_container_width=True):
+                st.session_state["theme"] = "dark"; st.rerun()
+
+st.markdown("---") # Visual separator
+
+# --- Chat History, Upload, and Input Logic (Unchanged) ---
 for entry in st.session_state.chat_history:
     if "user" in entry: st.markdown(f"<div class='msg-user'>{entry['user']}</div>", unsafe_allow_html=True)
     else:
@@ -181,10 +201,11 @@ for entry in st.session_state.chat_history:
             if os.path.exists(pdf_path):
                 with open(pdf_path, "rb") as pdf_file:
                     st.download_button("📥 Download Cheatsheet", pdf_file.read(), entry["pdf_filename"], "application/pdf", key=f"dl_{entry['pdf_filename']}_{uuid.uuid4()}")
+
 with st.expander("Upload a Custom Document"):
-    uploaded_file = st.file_uploader("Upload a PDF to ask questions about it", type="pdf")
+    uploaded_file = st.file_uploader("Upload a PDF", type="pdf")
     if uploaded_file and st.button("Process Document"):
-        with st.spinner("Processing document..."):
+        with st.spinner("Processing..."):
             session_id = str(uuid.uuid4())
             temp_dir = os.path.join(TEMP_STORAGE_PATH, session_id)
             os.makedirs(temp_dir, exist_ok=True)
@@ -193,14 +214,13 @@ with st.expander("Upload a Custom Document"):
             doc = fitz.open(file_path)
             full_text = "".join(page.get_text() for page in doc)
             doc.close()
-            text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-            texts = text_splitter.split_text(full_text)
-            temp_db = FAISS.from_texts(texts, embeddings)
-            temp_db.save_local(temp_dir)
-            st.session_state["session_id"] = session_id
-            st.session_state["active_doc_name"] = uploaded_file.name
+            texts = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100).split_text(full_text)
+            FAISS.from_texts(texts, embeddings).save_local(temp_dir)
+            st.session_state.session_id = session_id
+            st.session_state.active_doc_name = uploaded_file.name
             st.session_state.chat_history.append({"bot": f"Ready for questions about **{uploaded_file.name}**."})
             st.rerun()
+
 if st.session_state["active_doc_name"]:
     st.info(f"Active Document: **{st.session_state['active_doc_name']}**")
     if st.button("Clear Document & Revert to Default"):
@@ -208,6 +228,7 @@ if st.session_state["active_doc_name"]:
         st.session_state["active_doc_name"] = None
         st.session_state.chat_history.append({"bot": "Reverted to default knowledge base."})
         st.rerun()
+
 if user_prompt := st.chat_input("Type your question here..."):
     st.markdown(f"<div class='msg-user'>{user_prompt}</div>", unsafe_allow_html=True)
     st.session_state.chat_history.append({"user": user_prompt})
