@@ -164,9 +164,10 @@ st.markdown(f"""
     @media (max-width: 768px) {{ .topbar-custom {{ font-size: 1.2rem; padding: 1em; text-align: center; }} .msg-user, .msg-bot {{ font-size: 0.95rem; max-width: 90%; }} }}
 </style>
 """, unsafe_allow_html=True)
-col1 = st.columns([10])
-with col1:
+col1, col2 = st.columns([8,1])
+    with col1:
         st.markdown("<div class='topbar-custom'>Ophthalmology AI Assistant</div>", unsafe_allow_html=True)
+    with col2:
         if st.button("☀️", key="theme-sun", help="Switch to light mode"): st.session_state["theme"] = "light"; st.rerun()
         if st.button("🌙", key="theme-moon", help="Switch to dark mode"): st.session_state["theme"] = "dark"; st.rerun()
 
