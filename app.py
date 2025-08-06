@@ -12,7 +12,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmb
 from langchain.prompts import PromptTemplate
 from langchain import hub
 
-# --- 1. Configuration (Unchanged) ---
+# --- 1. Configuration ---
 GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY", "YOUR_DEFAULT_API_KEY_HERE")
 FAISS_INDEX_PATH = "oxford_handbook_kb"
 TEMP_STORAGE_PATH = "temp_user_docs"
@@ -97,16 +97,19 @@ def handle_query_logic(query: str, session_id: str = None):
     retriever = db.as_retriever(search_type="similarity", search_kwargs={"k": 5})
     @tool
     def question_answer_tool(query: str) -> str:
+        """Use for direct questions."""
         chain = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever)
         return chain.invoke(query)['result']
     @tool
     def concept_explainer_tool(topic: str) -> str:
+        """Use for detailed topic explanations."""
         context = "\n\n".join([doc.page_content for doc in retriever.get_relevant_documents(topic)])
         prompt = PromptTemplate.from_template("Provide a comprehensive explanation of {topic}.\n\nContext: {context}\nLecture:")
         chain = LLMChain(llm=llm, prompt=prompt)
         return chain.run(topic=topic, context=context)
     @tool
     def cheatsheet_generator_tool(topic: str) -> str:
+        """Use for cheat sheets or summaries. Generates a PDF."""
         context = "\n\n".join([doc.page_content for doc in retriever.get_relevant_documents(topic)])
         prompt = PromptTemplate.from_template("Create a detailed cheat sheet for {topic} using '##' for headings and '-' for list items.\nContext: {context}\nCheat Sheet:")
         chain = LLMChain(llm=llm, prompt=prompt)
@@ -139,31 +142,19 @@ if "session_id" not in st.session_state: st.session_state["session_id"] = None
 if "active_doc_name" not in st.session_state: st.session_state["active_doc_name"] = None
 THEME = DARK if st.session_state["theme"] == "dark" else LIGHT
 
-# --- CORRECTED: Custom CSS for a Compact, Responsive Top Bar ---
+# --- IMPROVED: Custom CSS for Responsive Top Bar ---
 st.markdown(f"""
 <style>
     .stApp {{ background: {THEME['bg']}; color: {THEME['text']}; }}
-    
-    /* Style the title text itself */
-    .topbar-title {{
+    .topbar-custom {{
+        background: {THEME['bar']};
+        border-radius: 16px;
+        padding: 1em 1.2em; /* Adjusted padding */
         font-size: 1.55rem;
         font-weight: 800;
         letter-spacing: .02em;
-        margin: 0; /* Important to override default paragraph margins */
-        line-height: 1;
-    }}
-    
-    /* Style the stHorizontalBlock that contains the top bar columns */
-    .st-emotion-cache-1rqbvhw {{
-        background: {THEME['bar']};
-        border-radius: 16px;
-        padding: 1em 1.2em;
-        margin-bottom: 1.6em;
         box-shadow: 0 2px 12px 0 rgba(44,46,66,0.06);
-        align-items: center; /* Vertically aligns title and buttons */
     }}
-
-    /* Other styles remain the same */
     .msg-user {{ background: {THEME['user']}; color: {THEME['text']}; border-radius: 16px 16px 4px 20px; margin-bottom: 0.3em; padding: 1em 1.35em; width: fit-content; max-width: 85%; font-size: 1.13rem; border: 1.5px solid {THEME['border']}; margin-left: auto; margin-right: 0; text-align: right; box-shadow: 0 1px 12px 0 rgba(55,96,148,0.05); word-break: break-word; }}
     .msg-bot {{ background: {THEME['bot']}; color: {THEME['text']}; border-radius: 16px 16px 20px 4px; margin-bottom: 0.7em; padding: 1.08em 1.23em 1em 1.18em; width: fit-content; max-width: 85%; font-size: 1.13rem; border: 1.5px solid {THEME['border']}; margin-right: auto; margin-left: 0; text-align: left; box-shadow: 0 1px 12px 0 rgba(44,46,66,0.05); word-break: break-word; }}
     [data-testid="stExpander"] {{ border-color: {THEME['border']}; background: {THEME['expander']}; }}
@@ -171,23 +162,34 @@ st.markdown(f"""
 
     /* Mobile Responsive Styles */
     @media (max-width: 768px) {{
-        .topbar-title {{ font-size: 1.1rem; }} /* Smaller title on mobile */
-        .st-emotion-cache-1rqbvhw {{ padding: 0.8em; }} /* Tighter padding on mobile */
+        .topbar-custom {{ font-size: 1.2rem; padding: 0.8em; }}
         .msg-user, .msg-bot {{ font-size: 0.95rem; max-width: 90%; }}
+        /* Ensure columns in the top bar have vertical alignment */
+        [data-testid="stHorizontalBlock"] {{
+            align-items: center;
+        }}
     }}
 </style>
 """, unsafe_allow_html=True)
 
-# --- CORRECTED: Top Bar Layout ---
-col1, col2, col3 = st.columns([6, 1, 1])
-with col1:
-    st.markdown("<p class='topbar-title'>Ophthalmology AI Assistant</p>", unsafe_allow_html=True)
-with col2:
-    if st.button("☀️", key="theme-sun", help="Switch to light mode", use_container_width=True):
-        st.session_state["theme"] = "light"; st.rerun()
-with col3:
-    if st.button("🌙", key="theme-moon", help="Switch to dark mode", use_container_width=True):
-        st.session_state["theme"] = "dark"; st.rerun()
+# --- IMPROVED: Responsive Top Bar Layout ---
+# This new structure is more robust for mobile screens.
+main_container = st.container()
+with main_container:
+    col1, col2 = st.columns([5, 2], gap="medium") # Give more space to title
+    with col1:
+        st.markdown("<div class='topbar-custom'>Ophthalmology AI Assistant</div>", unsafe_allow_html=True)
+    with col2:
+        # Nest columns for the buttons to keep them tight
+        btn_col1, btn_col2 = st.columns(2)
+        with btn_col1:
+            if st.button("☀️", key="theme-sun", help="Switch to light mode", use_container_width=True):
+                st.session_state["theme"] = "light"; st.rerun()
+        with btn_col2:
+            if st.button("🌙", key="theme-moon", help="Switch to dark mode", use_container_width=True):
+                st.session_state["theme"] = "dark"; st.rerun()
+
+st.markdown("---") # Visual separator
 
 # --- Chat History, Upload, and Input Logic (Unchanged) ---
 for entry in st.session_state.chat_history:
