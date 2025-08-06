@@ -121,7 +121,7 @@ def handle_query_logic(query: str, session_id: str = None):
                     pass
     return final_answer, pdf_filename
 
-# --- Streamlit UI (with Responsive Improvements) ---
+# --- Streamlit UI ---
 st.set_page_config(layout="centered")
 
 # --- Theme Dictionaries & Session State ---
@@ -148,7 +148,7 @@ st.markdown(f"""
     }}
     .topbar-custom {{
         background: {THEME['bar']};
-        border-radius: 16px; /* Moved from inline style for consistency */
+        border-radius: 16px;
         padding: 1.3em 1.2em 1.15em 2.1em;
         margin-bottom: 1.6em;
         box-shadow: 0 2px 12px 0 rgba(44,46,66,0.06);
@@ -177,36 +177,35 @@ st.markdown(f"""
     .stButton>button, .stDownloadButton>button {{
         border: 1px solid {THEME['border']};
     }}
-
-    /* --- RESPONSIVE STYLES FOR MOBILE --- */
     @media (max-width: 768px) {{
         .topbar-custom {{
-            font-size: 1.2rem; /* Smaller font for title on mobile */
-            padding: 1em;      /* Reduced padding */
+            font-size: 1.2rem;
+            padding: 1em;
             text-align: center;
         }}
         .msg-user, .msg-bot {{
-            font-size: 0.95rem;  /* Smaller font for chat messages */
-            max-width: 90%;    /* Allow slightly wider messages */
+            font-size: 0.95rem;
+            max-width: 90%;
         }}
     }}
 </style>
 """, unsafe_allow_html=True)
 
 # --- Top bar with theme buttons ---
-def top_bar():
-    col1, col2, col3 = st.columns([8, 1, 1]) # Adjusted column ratio
-    with col1:
-        # Removed inline style, now controlled by CSS class
-        st.markdown("<div class='topbar-custom'>Ophthalmology AI Assistant</div>", unsafe_allow_html=True)
-    with col2:
-        # Added use_container_width for better mobile layout
-        if st.button("☀️", key="theme-sun", help="Switch to light mode"): st.session_state["theme"] = "light"; st.rerun()
-        if st.button("🌙", key="theme-moon", help="Switch to dark mode"): st.session_state["theme"] = "dark"; st.rerun()
-
-top_bar()
+col1, col2, col3 = st.columns([8, 1, 1])
+with col1:
+    st.markdown("<div class='topbar-custom'>Ophthalmology AI Assistant</div>", unsafe_allow_html=True)
+with col2:
+    if st.button("☀️", key="theme-sun", help="Switch to light mode", use_container_width=True):
+        st.session_state["theme"] = "light"
+        st.rerun()
+with col3:
+    if st.button("🌙", key="theme-moon", help="Switch to dark mode", use_container_width=True):
+        st.session_state["theme"] = "dark"
+        st.rerun()
 
 # --- Chat History Display ---
+# This loop draws all the past messages
 for entry in st.session_state.chat_history:
     if "user" in entry:
         st.markdown(f"<div class='msg-user'>{entry['user']}</div>", unsafe_allow_html=True)
@@ -216,9 +215,9 @@ for entry in st.session_state.chat_history:
             pdf_path = os.path.join(CHEATSHEET_PATH, entry["pdf_filename"])
             if os.path.exists(pdf_path):
                 with open(pdf_path, "rb") as pdf_file:
-                    st.download_button("📥 Download Cheatsheet", pdf_file.read(), entry["pdf_filename"], "application/pdf")
+                    st.download_button("📥 Download Cheatsheet", pdf_file.read(), entry["pdf_filename"], "application/pdf", key=f"dl_{entry['pdf_filename']}_{uuid.uuid4()}")
 
-# --- Document Upload Expander ---
+# --- Document Upload and Status ---
 with st.expander("Upload a Custom Document"):
     uploaded_file = st.file_uploader("Upload a PDF to ask questions about it", type="pdf")
     if uploaded_file:
@@ -228,26 +227,20 @@ with st.expander("Upload a Custom Document"):
                 temp_dir = os.path.join(TEMP_STORAGE_PATH, session_id)
                 os.makedirs(temp_dir, exist_ok=True)
                 file_path = os.path.join(temp_dir, uploaded_file.name)
-                
                 with open(file_path, "wb") as buffer:
                     buffer.write(uploaded_file.getbuffer())
-                
                 doc = fitz.open(file_path)
                 full_text = "".join(page.get_text() for page in doc)
                 doc.close()
-                
                 text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
                 texts = text_splitter.split_text(full_text)
-                
                 temp_db = FAISS.from_texts(texts, embeddings)
                 temp_db.save_local(temp_dir)
-                
                 st.session_state["session_id"] = session_id
                 st.session_state["active_doc_name"] = uploaded_file.name
                 st.session_state.chat_history.append({"bot": f"Ready for questions about **{uploaded_file.name}**."})
                 st.rerun()
 
-# --- Active Document Status ---
 if st.session_state["active_doc_name"]:
     st.info(f"Active Document: **{st.session_state['active_doc_name']}**")
     if st.button("Clear Document & Revert to Default"):
@@ -256,11 +249,28 @@ if st.session_state["active_doc_name"]:
         st.session_state.chat_history.append({"bot": "Reverted to default knowledge base."})
         st.rerun()
 
-# --- User Input & Logic ---
+# --- User Input & Logic (OPTIMIZED FLOW) ---
 if user_prompt := st.chat_input("Type your question here..."):
+    # 1. Display the user's message immediately and add to history
+    st.markdown(f"<div class='msg-user'>{user_prompt}</div>", unsafe_allow_html=True)
     st.session_state.chat_history.append({"user": user_prompt})
-    
+
+    # 2. Show a spinner while the bot is "thinking"
     with st.spinner("Thinking..."):
+        # 3. Call the backend logic
         answer, pdf_filename = handle_query_logic(user_prompt, st.session_state.get("session_id"))
+        
+        # 4. Display the bot's response
+        st.markdown(f"<div class='msg-bot'>{answer}</div>", unsafe_allow_html=True)
+        
+        # 5. Display the download button if a PDF was created
+        if pdf_filename:
+            pdf_path = os.path.join(CHEATSHEET_PATH, pdf_filename)
+            if os.path.exists(pdf_path):
+                with open(pdf_path, "rb") as pdf_file:
+                    st.download_button("📥 Download Cheatsheet", pdf_file.read(), pdf_filename, "application/pdf", key=f"dl_{pdf_filename}_{uuid.uuid4()}")
+
+        # 6. Add the bot's response to the history
         st.session_state.chat_history.append({"bot": answer, "pdf_filename": pdf_filename})
-    st.rerun()
+
+# No st.rerun() is needed here, allowing the UI to update sequentially.
