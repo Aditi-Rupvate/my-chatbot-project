@@ -11,7 +11,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmb
 from langchain.prompts import PromptTemplate
 from langchain import hub
 
-# --- 1. Configuration (from api_rag.py) ---
+# --- 1. Configuration ---
 # Use st.secrets for your API key on Streamlit Cloud
 GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY", "YOUR_DEFAULT_API_KEY_HERE")
 FAISS_INDEX_PATH = "oxford_handbook_kb"
@@ -21,11 +21,11 @@ CHEATSHEET_PATH = "downloads"
 os.makedirs(TEMP_STORAGE_PATH, exist_ok=True)
 os.makedirs(CHEATSHEET_PATH, exist_ok=True)
 
-# --- Backend Components (from api_rag.py) ---
+# --- Backend Components ---
 embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=GOOGLE_API_KEY)
 llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.3, google_api_key=GOOGLE_API_KEY)
 
-# --- Helper Function for PDFs (from api_rag.py) ---
+# --- Helper Function for PDFs ---
 def create_formatted_pdf(text_content: str, topic: str) -> str:
     pdf = FPDF()
     pdf.add_page()
@@ -60,7 +60,7 @@ def create_formatted_pdf(text_content: str, topic: str) -> str:
     pdf.output(filepath)
     return filename
 
-# --- Main Query Logic (Integrated from api_rag.py) ---
+# --- Main Query Logic (Integrated from backend) ---
 def handle_query_logic(query: str, session_id: str = None):
     # Step 1: Select retriever
     if session_id:
@@ -121,7 +121,7 @@ def handle_query_logic(query: str, session_id: str = None):
                     pass
     return final_answer, pdf_filename
 
-# --- Streamlit UI (from your new api_front.py) ---
+# --- Streamlit UI (with Responsive Improvements) ---
 st.set_page_config(layout="centered")
 
 # --- Theme Dictionaries & Session State ---
@@ -139,7 +139,7 @@ if "active_doc_name" not in st.session_state:
 
 THEME = DARK if st.session_state["theme"] == "dark" else LIGHT
 
-# --- Custom CSS Styling (from your new api_front.py) ---
+# --- Custom CSS Styling (with Responsive Media Queries) ---
 st.markdown(f"""
 <style>
     .stApp {{
@@ -148,12 +148,13 @@ st.markdown(f"""
     }}
     .topbar-custom {{
         background: {THEME['bar']};
-        border-radius: 0 0 16px 16px;
+        border-radius: 16px; /* Moved from inline style for consistency */
         padding: 1.3em 1.2em 1.15em 2.1em;
         margin-bottom: 1.6em;
         box-shadow: 0 2px 12px 0 rgba(44,46,66,0.06);
-        display: flex; align-items: center; justify-content: space-between;
-        font-size:1.55rem; font-weight: 800; letter-spacing:.02em;
+        font-size: 1.55rem;
+        font-weight: 800;
+        letter-spacing: .02em;
     }}
     .msg-user {{
         background: {THEME['user']}; color: {THEME['text']}; border-radius: 16px 16px 4px 20px;
@@ -176,15 +177,30 @@ st.markdown(f"""
     .stButton>button, .stDownloadButton>button {{
         border: 1px solid {THEME['border']};
     }}
+
+    /* --- RESPONSIVE STYLES FOR MOBILE --- */
+    @media (max-width: 768px) {{
+        .topbar-custom {{
+            font-size: 1.2rem; /* Smaller font for title on mobile */
+            padding: 1em;      /* Reduced padding */
+            text-align: center;
+        }}
+        .msg-user, .msg-bot {{
+            font-size: 0.95rem;  /* Smaller font for chat messages */
+            max-width: 90%;    /* Allow slightly wider messages */
+        }}
+    }}
 </style>
 """, unsafe_allow_html=True)
 
 # --- Top bar with theme buttons ---
 def top_bar():
-    col1, col2, col3 = st.columns([10, 1, 1])
+    col1, col2, col3 = st.columns([8, 1, 1]) # Adjusted column ratio
     with col1:
-        st.markdown("<div class='topbar-custom' style='border-radius:16px;'>Ophthalmology AI Assistant</div>", unsafe_allow_html=True)
+        # Removed inline style, now controlled by CSS class
+        st.markdown("<div class='topbar-custom'>Ophthalmology AI Assistant</div>", unsafe_allow_html=True)
     with col2:
+        # Added use_container_width for better mobile layout
         if st.button("☀️", key="theme-sun", help="Switch to light mode"): st.session_state["theme"] = "light"; st.rerun()
         if st.button("🌙", key="theme-moon", help="Switch to dark mode"): st.session_state["theme"] = "dark"; st.rerun()
 
@@ -202,13 +218,12 @@ for entry in st.session_state.chat_history:
                 with open(pdf_path, "rb") as pdf_file:
                     st.download_button("📥 Download Cheatsheet", pdf_file.read(), entry["pdf_filename"], "application/pdf")
 
-# --- Document Upload Expander (with integrated backend logic) ---
+# --- Document Upload Expander ---
 with st.expander("Upload a Custom Document"):
     uploaded_file = st.file_uploader("Upload a PDF to ask questions about it", type="pdf")
     if uploaded_file:
         if st.button("Process Document"):
             with st.spinner("Processing document..."):
-                # This logic is from the /upload endpoint in api_rag.py
                 session_id = str(uuid.uuid4())
                 temp_dir = os.path.join(TEMP_STORAGE_PATH, session_id)
                 os.makedirs(temp_dir, exist_ok=True)
@@ -241,12 +256,11 @@ if st.session_state["active_doc_name"]:
         st.session_state.chat_history.append({"bot": "Reverted to default knowledge base."})
         st.rerun()
 
-# --- User Input & Logic (with integrated backend logic) ---
+# --- User Input & Logic ---
 if user_prompt := st.chat_input("Type your question here..."):
     st.session_state.chat_history.append({"user": user_prompt})
     
     with st.spinner("Thinking..."):
-        # This logic replaces the /query API call
         answer, pdf_filename = handle_query_logic(user_prompt, st.session_state.get("session_id"))
         st.session_state.chat_history.append({"bot": answer, "pdf_filename": pdf_filename})
     st.rerun()
