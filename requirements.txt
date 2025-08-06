@@ -9,3 +9,5 @@ PyMuPDF
 faiss-cpu
 speechrecognition
 PyAudio
+libportaudio2
+portaudio19-dev
