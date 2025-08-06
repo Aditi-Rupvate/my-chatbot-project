@@ -6,6 +6,7 @@ st.set_page_config(layout="centered")
 
 # --- 1. Device Width Detection ---
 if "screen_width" not in st.session_state:
+    st.session_state["screen_width"] = 768  # default fallback
     components.html("""
         <script>
         const sendWidth = () => {
@@ -18,18 +19,13 @@ if "screen_width" not in st.session_state:
         sendWidth();
         </script>
     """, height=0, scrolling=False)
-    st.session_state["screen_width"] = 768  # default
-
-# Fallback method using JS evaluation
-try:
-    width = components.html("<script>document.write(window.innerWidth)</script>", height=0)
-except:
-    width = 768
-st.session_state["screen_width"] = width or 768
 
 # --- 2. Determine Device Type ---
 def get_device_type():
-    width = st.session_state.get("screen_width", 768)
+    try:
+        width = int(st.session_state.get("screen_width", 768))
+    except (ValueError, TypeError):
+        width = 768
     if width < 576:
         return "mobile"
     elif width < 992:
