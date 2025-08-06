@@ -179,15 +179,8 @@ def top_bar():
     col1, col2 = st.columns([10, 1])
     with col1:
         st.title("Ophthalmology Learning Assistant")
-    with col2:
-        if st.session_state["theme"] == "dark":
-            if st.button("☀️", help="Switch to Light Mode", use_container_width=True):
-                st.session_state["theme"] = "light"
-                st.rerun()
-        else:
-            if st.button("🌙", help="Switch to Dark Mode", use_container_width=True):
-                st.session_state["theme"] = "dark"
-                st.rerun()
+   if st.button("☀️", key="theme-sun", help="Switch to light mode"): st.session_state["theme"] = "light"; st.rerun()
+        if st.button("🌙", key="theme-moon", help="Switch to dark mode"): st.session_state["theme"] = "dark"; st.rerun()
 
 top_bar()
 
