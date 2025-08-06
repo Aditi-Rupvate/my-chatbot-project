@@ -185,13 +185,9 @@ def top_bar():
     with col1:
         st.markdown("<div class='topbar-custom' style='border-radius:16px;'>Ophthalmology AI Assistant</div>", unsafe_allow_html=True)
     with col2:
-        if st.button("☀️", key="theme-sun", help="Switch to light mode", use_container_width=True):
-            st.session_state["theme"] = "light"
-            st.rerun()
-    with col3:
-        if st.button("🌙", key="theme-moon", help="Switch to dark mode", use_container_width=True):
-            st.session_state["theme"] = "dark"
-            st.rerun()
+        if st.button("☀️", key="theme-sun", help="Switch to light mode"): st.session_state["theme"] = "light"; st.rerun()
+        if st.button("🌙", key="theme-moon", help="Switch to dark mode"): st.session_state["theme"] = "dark"; st.rerun()
+
 top_bar()
 
 # --- Chat History Display ---
