@@ -153,15 +153,84 @@ if "chat_history" not in st.session_state: st.session_state["chat_history"] = []
 if "session_id" not in st.session_state: st.session_state["session_id"] = None
 if "active_doc_name" not in st.session_state: st.session_state["active_doc_name"] = None
 THEME = DARK if st.session_state["theme"] == "dark" else LIGHT
+# --- Responsive UI Styling ---
 st.markdown(f"""
 <style>
     .stApp {{ background: {THEME['bg']}; color: {THEME['text']}; }}
-    .topbar-custom {{ background: {THEME['bar']}; border-radius: 16px; padding: 1.3em 1.2em 1.15em 2.1em; margin-bottom: 1.6em; box-shadow: 0 2px 12px 0 rgba(44,46,66,0.06); font-size: 1.55rem; font-weight: 800; letter-spacing: .02em; }}
-    .msg-user {{ background: {THEME['user']}; color: {THEME['text']}; border-radius: 16px 16px 4px 20px; margin-bottom: 0.3em; padding: 1em 1.35em; width: fit-content; max-width: 85%; font-size: 1.13rem; border: 1.5px solid {THEME['border']}; margin-left: auto; margin-right: 0; text-align: right; box-shadow: 0 1px 12px 0 rgba(55,96,148,0.05); word-break: break-word; }}
-    .msg-bot {{ background: {THEME['bot']}; color: {THEME['text']}; border-radius: 16px 16px 20px 4px; margin-bottom: 0.7em; padding: 1.08em 1.23em 1em 1.18em; width: fit-content; max-width: 85%; font-size: 1.13rem; border: 1.5px solid {THEME['border']}; margin-right: auto; margin-left: 0; text-align: left; box-shadow: 0 1px 12px 0 rgba(44,46,66,0.05); word-break: break-word; }}
-    [data-testid="stExpander"] {{ border-color: {THEME['border']}; background: {THEME['expander']}; }}
-    .stButton>button, .stDownloadButton>button {{ border: 1px solid {THEME['border']}; }}
-    @media (max-width: 768px) {{ .topbar-custom {{ font-size: 1.2rem; padding: 1em; text-align: center; }} .msg-user, .msg-bot {{ font-size: 0.95rem; max-width: 90%; }} }}
+
+    .topbar-custom {{
+        background: {THEME['bar']};
+        border-radius: 16px;
+        padding: 1.3em 1.2em 1.15em 2.1em;
+        margin-bottom: 1.6em;
+        box-shadow: 0 2px 12px 0 rgba(44,46,66,0.06);
+        font-size: 1.55rem;
+        font-weight: 800;
+        letter-spacing: .02em;
+    }}
+
+    .msg-user {{
+        background: {THEME['user']};
+        color: {THEME['text']};
+        border-radius: 16px 16px 4px 20px;
+        margin-bottom: 0.3em;
+        padding: 1em 1.35em;
+        width: fit-content;
+        max-width: 85%;
+        font-size: 1.13rem;
+        border: 1.5px solid {THEME['border']};
+        margin-left: auto;
+        margin-right: 0;
+        text-align: right;
+        box-shadow: 0 1px 12px 0 rgba(55,96,148,0.05);
+        word-break: break-word;
+    }}
+
+    .msg-bot {{
+        background: {THEME['bot']};
+        color: {THEME['text']};
+        border-radius: 16px 16px 20px 4px;
+        margin-bottom: 0.7em;
+        padding: 1.08em 1.23em 1em 1.18em;
+        width: fit-content;
+        max-width: 85%;
+        font-size: 1.13rem;
+        border: 1.5px solid {THEME['border']};
+        margin-right: auto;
+        margin-left: 0;
+        text-align: left;
+        box-shadow: 0 1px 12px 0 rgba(44,46,66,0.05);
+        word-break: break-word;
+    }}
+
+    [data-testid="stExpander"] {{
+        border-color: {THEME['border']};
+        background: {THEME['expander']};
+    }}
+
+    .stButton>button, .stDownloadButton>button {{
+        border: 1px solid {THEME['border']};
+    }}
+
+    /* Mobile Responsive Design */
+    @media only screen and (max-width: 768px) {{
+        .topbar-custom {{
+            font-size: 1.2rem;
+            padding: 1em;
+            text-align: center;
+        }}
+        .msg-user, .msg-bot {{
+            font-size: 0.95rem;
+            max-width: 95%;
+        }}
+        .mobile-only {{ display: block !important; }}
+        .desktop-only {{ display: none !important; }}
+    }}
+
+    @media only screen and (min-width: 769px) {{
+        .mobile-only {{ display: none !important; }}
+        .desktop-only {{ display: block !important; }}
+    }}
 </style>
 """, unsafe_allow_html=True)
 col1, col2, col3 = st.columns([8, 1, 1])
