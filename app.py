@@ -14,14 +14,14 @@ from langchain import hub
 # --- 1. Configuration ---
 # It's recommended to use st.secrets for your API key on Streamlit Cloud
 GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY", "YOUR_DEFAULT_API_KEY_HERE")
-FAISS_INDEX_PATH = "oxford_handbook_kb"  # Ensure this path is correct for your deployment
+FAISS_INDEX_PATH = "oxford_handbook_kb"
 TEMP_STORAGE_PATH = "temp_user_docs"
 CHEATSHEET_PATH = "downloads"
 
 os.makedirs(TEMP_STORAGE_PATH, exist_ok=True)
 os.makedirs(CHEATSHEET_PATH, exist_ok=True)
 
-# --- FastAPI app & Core Components (Now part of Streamlit) ---
+# --- Backend Components ---
 embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=GOOGLE_API_KEY)
 llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.3, google_api_key=GOOGLE_API_KEY)
 
@@ -30,10 +30,10 @@ def create_formatted_pdf(text_content: str, topic: str) -> str:
     pdf = FPDF()
     pdf.add_page()
     try:
-        # Assumes fonts are in the root directory
         pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
         pdf.add_font("DejaVu", "B", "DejaVuSans-Bold.ttf", uni=True)
-    except FileNotFoundError:
+    except RuntimeError:
+        # FPDF raises RuntimeError if font file is not found
         st.error("Could not find 'DejaVuSans.ttf' or 'DejaVuSans-Bold.ttf'. Please ensure they are in the root folder.")
         return ""
 
@@ -61,7 +61,7 @@ def create_formatted_pdf(text_content: str, topic: str) -> str:
     pdf.output(filepath)
     return filename
 
-# --- Main Query Logic (Integrated from FastAPI) ---
+# --- Main Query Logic (Integrated from backend) ---
 def handle_query_logic(query: str, session_id: str = None):
     # Step 1: Select the correct retriever
     if session_id:
@@ -70,7 +70,6 @@ def handle_query_logic(query: str, session_id: str = None):
             return "Error: Your document session has expired or is invalid. Please upload the document again.", None
         db = FAISS.load_local(temp_db_path, embeddings, allow_dangerous_deserialization=True)
     else:
-        # This part requires the FAISS_INDEX_PATH to be present in your deployment environment
         if not os.path.exists(FAISS_INDEX_PATH):
              return "Error: The default knowledge base is not available. Please upload a document to begin.", None
         db = FAISS.load_local(FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
@@ -107,7 +106,7 @@ def handle_query_logic(query: str, session_id: str = None):
     # Step 3: Run the agent
     prompt = hub.pull("hwchase17/react")
     agent = create_react_agent(llm, tools, prompt)
-    agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True, handle_parsing_errors=True, return_intermediate_steps=True)
+    agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=False, handle_parsing_errors=True, return_intermediate_steps=True)
     response = agent_executor.invoke({"input": query})
     
     final_answer = response.get('output', "I couldn't find an answer.")
@@ -127,6 +126,12 @@ def handle_query_logic(query: str, session_id: str = None):
 # --- Streamlit UI ---
 st.set_page_config(layout="centered")
 
+# --- Theme Dictionaries & Session State from api_front.py ---
+LIGHT = { "bg": "#f8fafb", "bar": "#fff", "bot": "#e9eef6", "user": "#d1e7dd", "text": "#191b22", "input": "#e8edf2", "border": "#d4dde7", "expander": "#f4f7fb" }
+DARK = { "bg": "#18181c", "bar": "#202126", "bot": "#232733", "user": "#22577a", "text": "#f3f5f8", "input": "#242730", "border": "#26282f", "expander": "#24272e" }
+
+if "theme" not in st.session_state:
+    st.session_state["theme"] = "dark"
 if "chat_history" not in st.session_state:
     st.session_state["chat_history"] = []
 if "session_id" not in st.session_state:
@@ -134,6 +139,41 @@ if "session_id" not in st.session_state:
 if "active_doc_name" not in st.session_state:
     st.session_state["active_doc_name"] = None
 
+THEME = DARK if st.session_state["theme"] == "dark" else LIGHT
+
+# --- Custom CSS Styling from api_front.py ---
+st.markdown(f"""
+<style>
+    .stApp {{
+        background-color: {THEME['bg']};
+        color: {THEME['text']};
+    }}
+    [data-testid="stSidebar"] {{
+        background-color: {THEME['bar']};
+    }}
+    .stChatMessage {{
+        background-color: {THEME['bot']};
+        border-radius: 0.5rem;
+    }}
+    div[data-testid="stChatMessage"][data-user-border-color] {{
+        background-color: {THEME['user']};
+    }}
+    [data-testid="stChatInput"] {{
+        background-color: {THEME['bg']};
+    }}
+     [data-testid="stChatInput"] textarea {{
+        background-color: {THEME['input']};
+        color: {THEME['text']};
+    }}
+    .stButton>button, .stDownloadButton>button {{
+        border: 1px solid {THEME['border']};
+        background-color: {THEME['input']};
+        color: {THEME['text']};
+    }}
+</style>
+""", unsafe_allow_html=True)
+
+# --- Top Bar and Theme Toggle ---
 st.title("Ophthalmology Learning Assistant")
 
 # Sidebar for document upload
