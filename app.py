@@ -1,9 +1,8 @@
 import os
 import uuid
 import streamlit as st
-import speech_recognition as sr
 from fpdf import FPDF
-import fitz # PyMuPDF
+import fitz  # PyMuPDF
 from langchain.agents import AgentExecutor, create_react_agent, tool
 from langchain.chains import RetrievalQA, LLMChain
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -12,148 +11,196 @@ from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmb
 from langchain.prompts import PromptTemplate
 from langchain import hub
 
-# --- 1. Configuration and Setup ---
-
-# IMPORTANT: Set your GOOGLE_API_KEY in Streamlit's secrets
-# Go to your app's settings > secrets and add GOOGLE_API_KEY = "your_key_here"
-GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY")
-
-FAISS_INDEX_PATH = "oxford_handbook_kb"
+# --- 1. Configuration ---
+# It's recommended to use st.secrets for your API key on Streamlit Cloud
+GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY", "YOUR_DEFAULT_API_KEY_HERE")
+FAISS_INDEX_PATH = "oxford_handbook_kb"  # Ensure this path is correct for your deployment
+TEMP_STORAGE_PATH = "temp_user_docs"
 CHEATSHEET_PATH = "downloads"
 
-# Create directories if they don't exist
+os.makedirs(TEMP_STORAGE_PATH, exist_ok=True)
 os.makedirs(CHEATSHEET_PATH, exist_ok=True)
 
-# --- 2. Core Application Logic (from your backend) ---
-
-# Initialize LLM and Embeddings
-# Add a check to ensure the API key is available
-if not GOOGLE_API_KEY:
-    st.error("Google API Key not found. Please set it in Streamlit's secrets.")
-    st.stop()
-
+# --- FastAPI app & Core Components (Now part of Streamlit) ---
 embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=GOOGLE_API_KEY)
 llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.3, google_api_key=GOOGLE_API_KEY)
 
-# PDF Generation Function
+# --- Helper Function for PDFs ---
 def create_formatted_pdf(text_content: str, topic: str) -> str:
-    # This function is unchanged from your previous version
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Arial", "B", 16)
-    pdf.cell(0, 10, f"Cheatsheet: {topic.title()}", 0, 1, 'C')
+    try:
+        # Assumes fonts are in the root directory
+        pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
+        pdf.add_font("DejaVu", "B", "DejaVuSans-Bold.ttf", uni=True)
+    except FileNotFoundError:
+        st.error("Could not find 'DejaVuSans.ttf' or 'DejaVuSans-Bold.ttf'. Please ensure they are in the root folder.")
+        return ""
+
+    pdf.set_font("DejaVu", "B", 18)
+    pdf.cell(0, 10, f"Ophthalmology Cheatsheet: {topic.title()}", 0, 1, 'C')
     pdf.ln(10)
-    pdf.set_font("Arial", "", 12)
-    pdf.multi_cell(0, 10, text_content)
-    filename = f"{uuid.uuid4()}.pdf"
+    for line in text_content.split('\n'):
+        line = line.strip()
+        if line.startswith('## '):
+            pdf.set_font("DejaVu", "B", 14)
+            pdf.cell(0, 10, line.replace('## ', ''), 0, 1, 'L')
+            pdf.ln(2)
+        elif line.startswith('- '):
+            pdf.set_font("DejaVu", "", 11)
+            pdf.set_x(15)
+            pdf.multi_cell(0, 7, f"• {line.replace('- ', '')}")
+            pdf.ln(1)
+        else:
+            pdf.set_font("DejaVu", "", 11)
+            pdf.multi_cell(0, 7, line)
+            pdf.ln(2)
+    unique_id = uuid.uuid4()
+    filename = f"{unique_id}.pdf"
     filepath = os.path.join(CHEATSHEET_PATH, filename)
     pdf.output(filepath)
-    return filepath
+    return filename
 
-# Load the default knowledge base once and cache it
-@st.cache_resource
-def load_default_db():
-    if os.path.exists(FAISS_INDEX_PATH):
-        return FAISS.load_local(FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
-    return None
+# --- Main Query Logic (Integrated from FastAPI) ---
+def handle_query_logic(query: str, session_id: str = None):
+    # Step 1: Select the correct retriever
+    if session_id:
+        temp_db_path = os.path.join(TEMP_STORAGE_PATH, session_id)
+        if not os.path.exists(temp_db_path):
+            return "Error: Your document session has expired or is invalid. Please upload the document again.", None
+        db = FAISS.load_local(temp_db_path, embeddings, allow_dangerous_deserialization=True)
+    else:
+        # This part requires the FAISS_INDEX_PATH to be present in your deployment environment
+        if not os.path.exists(FAISS_INDEX_PATH):
+             return "Error: The default knowledge base is not available. Please upload a document to begin.", None
+        db = FAISS.load_local(FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
 
-default_db = load_default_db()
+    retriever = db.as_retriever(search_type="similarity", search_kwargs={"k": 5})
 
-# --- 3. Streamlit User Interface ---
+    # Step 2: Define the tools
+    @tool
+    def question_answer_tool(query: str) -> str:
+        """Use this tool ONLY to answer a direct, specific question from the user."""
+        chain = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever)
+        return chain.invoke(query)['result']
 
-# Page configuration
-st.set_page_config(layout="centered", page_title="Ophthalmology AI")
+    @tool
+    def concept_explainer_tool(topic: str) -> str:
+        """Use this tool ONLY when the user asks to be taught or for a detailed explanation of a topic."""
+        context = "\n\n".join([doc.page_content for doc in retriever.get_relevant_documents(topic)])
+        prompt = PromptTemplate.from_template("Provide a comprehensive explanation of {topic}.\n\nContext: {context}\nLecture:")
+        chain = LLMChain(llm=llm, prompt=prompt)
+        return chain.run(topic=topic, context=context)
 
-# UI Styling (your CSS here)
-st.markdown("""<style> ... </style>""", unsafe_allow_html=True) # Keep your full CSS
+    @tool
+    def cheatsheet_generator_tool(topic: str) -> str:
+        """Use this tool ONLY when the user asks for a cheat sheet, summary, or key points. This tool generates a well-formatted PDF."""
+        context = "\n\n".join([doc.page_content for doc in retriever.get_relevant_documents(topic)])
+        prompt = PromptTemplate.from_template("Create a detailed cheat sheet for {topic} using '##' for headings and '-' for list items.\nContext: {context}\nCheat Sheet:")
+        chain = LLMChain(llm=llm, prompt=prompt)
+        cheatsheet_text = chain.run(topic=topic, context=context)
+        pdf_filename = create_formatted_pdf(cheatsheet_text, topic)
+        return f"PDF_GENERATED::{pdf_filename}::{cheatsheet_text}"
 
-# Top Bar
-st.markdown("<div class='topbar-custom'>Ophthalmology AI Assistant</div>", unsafe_allow_html=True)
+    tools = [question_answer_tool, concept_explainer_tool, cheatsheet_generator_tool]
+    
+    # Step 3: Run the agent
+    prompt = hub.pull("hwchase17/react")
+    agent = create_react_agent(llm, tools, prompt)
+    agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True, handle_parsing_errors=True, return_intermediate_steps=True)
+    response = agent_executor.invoke({"input": query})
+    
+    final_answer = response.get('output', "I couldn't find an answer.")
+    pdf_filename = None
 
-# Initialize Session State
+    # Step 4: Process results for PDF
+    if 'intermediate_steps' in response:
+        for _, observation in response['intermediate_steps']:
+            if isinstance(observation, str) and observation.startswith("PDF_GENERATED::"):
+                try:
+                    parts = observation.split("::")
+                    pdf_filename = parts[1]
+                except IndexError:
+                    pass
+    return final_answer, pdf_filename
+
+# --- Streamlit UI ---
+st.set_page_config(layout="centered")
+
 if "chat_history" not in st.session_state:
     st.session_state["chat_history"] = []
 if "session_id" not in st.session_state:
     st.session_state["session_id"] = None
+if "active_doc_name" not in st.session_state:
+    st.session_state["active_doc_name"] = None
 
-# Chat History Display
-for entry in st.session_state.chat_history:
-    if "user" in entry:
-        st.chat_message("user").write(entry["user"])
-    else:
-        st.chat_message("assistant").write(entry["bot"])
-        if entry.get("pdf_path"):
-            with open(entry["pdf_path"], "rb") as f:
-                st.download_button("📥 Download Cheatsheet", f, file_name=os.path.basename(entry["pdf_path"]))
+st.title("Ophthalmology Learning Assistant")
 
-# Document Upload and Processing
-with st.expander("Upload a Custom Document"):
+# Sidebar for document upload
+with st.sidebar:
+    st.header("Upload Your Document")
     uploaded_file = st.file_uploader("Upload a PDF to ask questions about it", type="pdf")
     if uploaded_file:
         if st.button("Process Document"):
             with st.spinner("Processing document..."):
-                # All processing now happens directly in the Streamlit app
-                doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
+                session_id = str(uuid.uuid4())
+                temp_dir = os.path.join(TEMP_STORAGE_PATH, session_id)
+                os.makedirs(temp_dir)
+                file_path = os.path.join(temp_dir, uploaded_file.name)
+                
+                with open(file_path, "wb") as buffer:
+                    buffer.write(uploaded_file.getbuffer())
+                
+                doc = fitz.open(file_path)
                 full_text = "".join(page.get_text() for page in doc)
+                doc.close()
+                
                 text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
                 texts = text_splitter.split_text(full_text)
                 
-                # Create a temporary in-memory vector store for the session
-                st.session_state.custom_db = FAISS.from_texts(texts, embeddings)
-                st.session_state.active_doc_name = uploaded_file.name
-                st.chat_message("assistant").write(f"Ready for questions about **{uploaded_file.name}**.")
+                temp_db = FAISS.from_texts(texts, embeddings)
+                temp_db.save_local(temp_dir)
+                
+                st.session_state["session_id"] = session_id
+                st.session_state["active_doc_name"] = uploaded_file.name
+                st.success(f"Processed '{uploaded_file.name}'")
+    
+    if st.session_state["active_doc_name"]:
+        st.info(f"Active document: **{st.session_state['active_doc_name']}**")
+    else:
+        st.info("Using the default Ophthalmology knowledge base.")
 
-# Handle the query from text or voice input
-prompt = st.chat_input("Type your question here...")
+# Chat interface
+for message in st.session_state.chat_history:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+        if "pdf_filename" in message and message["pdf_filename"]:
+            pdf_path = os.path.join(CHEATSHEET_PATH, message["pdf_filename"])
+            with open(pdf_path, "rb") as pdf_file:
+                st.download_button(
+                    label="Download Cheatsheet",
+                    data=pdf_file,
+                    file_name=message["pdf_filename"],
+                    mime='application/pdf'
+                )
 
-if prompt:
-    st.session_state.chat_history.append({"user": prompt})
-    st.chat_message("user").write(prompt)
-
+if prompt := st.chat_input("Ask a question, request a topic explanation, or ask for a cheat sheet..."):
+    st.chat_message("user").markdown(prompt)
+    st.session_state.chat_history.append({"role": "user", "content": prompt})
+    
     with st.spinner("Thinking..."):
-        # Determine which retriever to use
-        if 'custom_db' in st.session_state and st.session_state.custom_db:
-            retriever = st.session_state.custom_db.as_retriever()
-        elif default_db:
-            retriever = default_db.as_retriever()
-        else:
-            st.error("Knowledge base not found.")
-            st.stop()
-
-        # Define tools using the selected retriever
-        @tool
-        def question_answer_tool(query: str) -> str:
-            """Answers a direct, specific question."""
-            chain = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever)
-            return chain.invoke(query)['result']
-
-        @tool
-        def cheatsheet_generator_tool(topic: str) -> str:
-            """Creates a summary or cheat sheet PDF."""
-            context = "\n\n".join([doc.page_content for doc in retriever.get_relevant_documents(topic)])
-            prompt_template = PromptTemplate.from_template("Create a cheat sheet for {topic} based on this context: {context}")
-            chain = LLMChain(llm=llm, prompt=prompt_template)
-            cheatsheet_text = chain.run(topic=topic, context=context)
-            pdf_path = create_formatted_pdf(cheatsheet_text, topic)
-            return f"PDF_GENERATED::{pdf_path}::{cheatsheet_text}"
-
-        # Run the agent
-        tools = [question_answer_tool, cheatsheet_generator_tool]
-        agent_prompt = hub.pull("hwchase17/react")
-        agent = create_react_agent(llm, tools, agent_prompt)
-        agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True, handle_parsing_errors=True, return_intermediate_steps=True)
+        answer, pdf_filename = handle_query_logic(prompt, st.session_state.get("session_id"))
         
-        response = agent_executor.invoke({"input": prompt})
+        with st.chat_message("assistant"):
+            st.markdown(answer)
+            if pdf_filename:
+                pdf_path = os.path.join(CHEATSHEET_PATH, pdf_filename)
+                with open(pdf_path, "rb") as pdf_file:
+                    st.download_button(
+                        label="Download Cheatsheet",
+                        data=pdf_file,
+                        file_name=pdf_filename,
+                        mime='application/pdf'
+                    )
         
-        final_answer = response.get('output', "Sorry, I couldn't find an answer.")
-        pdf_path = None
-        if 'intermediate_steps' in response:
-            for _, observation in response['intermediate_steps']:
-                if isinstance(observation, str) and observation.startswith("PDF_GENERATED::"):
-                    pdf_path = observation.split("::")[1]
-                    break
-
-        bot_message = {"bot": final_answer, "pdf_path": pdf_path}
-        st.session_state.chat_history.append(bot_message)
-        st.rerun()
-
+        st.session_state.chat_history.append({"role": "assistant", "content": answer, "pdf_filename": pdf_filename})
