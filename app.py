@@ -11,8 +11,8 @@ from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmb
 from langchain.prompts import PromptTemplate
 from langchain import hub
 
-# --- 1. Configuration ---
-# It's recommended to use st.secrets for your API key on Streamlit Cloud
+# --- 1. Configuration (from api_rag.py) ---
+# Use st.secrets for your API key on Streamlit Cloud
 GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY", "YOUR_DEFAULT_API_KEY_HERE")
 FAISS_INDEX_PATH = "oxford_handbook_kb"
 TEMP_STORAGE_PATH = "temp_user_docs"
@@ -21,11 +21,11 @@ CHEATSHEET_PATH = "downloads"
 os.makedirs(TEMP_STORAGE_PATH, exist_ok=True)
 os.makedirs(CHEATSHEET_PATH, exist_ok=True)
 
-# --- Backend Components ---
+# --- Backend Components (from api_rag.py) ---
 embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=GOOGLE_API_KEY)
 llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.3, google_api_key=GOOGLE_API_KEY)
 
-# --- Helper Function for PDFs ---
+# --- Helper Function for PDFs (from api_rag.py) ---
 def create_formatted_pdf(text_content: str, topic: str) -> str:
     pdf = FPDF()
     pdf.add_page()
@@ -62,7 +62,7 @@ def create_formatted_pdf(text_content: str, topic: str) -> str:
     pdf.output(filepath)
     return filename
 
-# --- Main Query Logic (Integrated from backend) ---
+# --- Main Query Logic (Integrated from api_rag.py) ---
 def handle_query_logic(query: str, session_id: str = None):
     # Step 1: Select the correct retriever
     if session_id:
@@ -124,7 +124,7 @@ def handle_query_logic(query: str, session_id: str = None):
                     pass
     return final_answer, pdf_filename
 
-# --- Streamlit UI ---
+# --- Streamlit UI (from api_front.py) ---
 st.set_page_config(layout="centered")
 
 # --- Theme Dictionaries & Session State from original UI ---
@@ -174,7 +174,7 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# --- Top Bar with Title and Theme Toggle ---
+# --- Top Bar with Title and Theme Toggle (from original UI) ---
 def top_bar():
     col1, col2 = st.columns([10, 1])
     with col1:
@@ -191,16 +191,18 @@ def top_bar():
 
 top_bar()
 
-# --- Sidebar for document upload ---
+# --- Sidebar for document upload (integrating backend logic) ---
 with st.sidebar:
     st.header("Upload Your Document")
     uploaded_file = st.file_uploader("Upload a PDF to ask questions about it", type="pdf")
+    
     if uploaded_file:
         if st.button("Process Document"):
-            with st.spinner("Processing document..."):
+            with st.spinner("Processing document... This may take a moment."):
+                # This logic is from the /upload endpoint in api_rag.py
                 session_id = str(uuid.uuid4())
                 temp_dir = os.path.join(TEMP_STORAGE_PATH, session_id)
-                os.makedirs(temp_dir)
+                os.makedirs(temp_dir, exist_ok=True)
                 file_path = os.path.join(temp_dir, uploaded_file.name)
                 
                 with open(file_path, "wb") as buffer:
@@ -218,6 +220,7 @@ with st.sidebar:
                 
                 st.session_state["session_id"] = session_id
                 st.session_state["active_doc_name"] = uploaded_file.name
+                st.session_state["chat_history"] = [] # Clear history for new doc
                 st.success(f"Processed '{uploaded_file.name}'")
     
     st.divider()
@@ -227,7 +230,7 @@ with st.sidebar:
     else:
         st.info("Using the default Ophthalmology knowledge base.")
 
-# --- Chat interface ---
+# --- Chat interface (integrating backend logic) ---
 for message in st.session_state.chat_history:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
@@ -247,6 +250,7 @@ if prompt := st.chat_input("Ask a question, request a topic explanation, or ask 
     st.session_state.chat_history.append({"role": "user", "content": prompt})
     
     with st.spinner("Thinking..."):
+        # This logic is from the /query endpoint in api_rag.py
         answer, pdf_filename = handle_query_logic(prompt, st.session_state.get("session_id"))
         
         with st.chat_message("assistant"):
@@ -262,4 +266,6 @@ if prompt := st.chat_input("Ask a question, request a topic explanation, or ask 
                             mime='application/pdf'
                         )
         
+        # Append the complete response, including pdf_filename for re-rendering
         st.session_state.chat_history.append({"role": "assistant", "content": answer, "pdf_filename": pdf_filename})
+
