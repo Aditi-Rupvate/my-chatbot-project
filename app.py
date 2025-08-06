@@ -24,8 +24,7 @@ os.makedirs(CHEATSHEET_PATH, exist_ok=True)
 embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=GOOGLE_API_KEY)
 llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.3, google_api_key=GOOGLE_API_KEY)
 
-# --- IMPROVED PDF GENERATION ---
-# By creating a custom class, we can add headers and footers automatically.
+# --- PDF Generation Class (Unchanged) ---
 class PDF(FPDF):
     def __init__(self, topic, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -33,55 +32,56 @@ class PDF(FPDF):
 
     def header(self):
         self.set_font("DejaVu", "B", 9)
-        self.set_text_color(128, 128, 128) # Gray color
+        self.set_text_color(128, 128, 128)
         self.cell(0, 10, f"Ophthalmology Cheatsheet: {self.topic.title()}", 0, 0, 'L')
         self.ln(10)
 
     def footer(self):
-        self.set_y(-15) # Position 1.5 cm from bottom
+        self.set_y(-15)
         self.set_font("DejaVu", "", 8)
         self.set_text_color(128, 128, 128)
         self.cell(0, 10, f"Page {self.page_no()}/{{nb}}", 0, 0, 'C')
 
+# --- CORRECTED PDF Function ---
 def create_formatted_pdf(text_content: str, topic: str) -> str:
-    # Use our new PDF class
     pdf = PDF(topic)
-    pdf.alias_nb_pages() # Enables total page count in footer
-    pdf.add_page()
-    pdf.set_margins(15, 15, 15) # Left, Top, Right margins
-    pdf.set_auto_page_break(auto=True, margin=20)
-
+    
+    # --- FIX: Load fonts BEFORE creating the first page ---
     try:
         pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
         pdf.add_font("DejaVu", "B", "DejaVuSans-Bold.ttf", uni=True)
     except RuntimeError:
-        st.error("Could not find 'DejaVuSans.ttf' or 'DejaVuSans-Bold.ttf'.")
+        st.error("Could not find 'DejaVuSans.ttf' or 'DejaVuSans-Bold.ttf'. Please ensure they are in the root folder.")
         return ""
+
+    pdf.alias_nb_pages()
+    pdf.add_page() # This is now safe, as it will call the header with fonts loaded
+    pdf.set_margins(15, 15, 15)
+    pdf.set_auto_page_break(auto=True, margin=20)
 
     # --- Main Title ---
     pdf.set_font("DejaVu", "B", 20)
-    pdf.set_text_color(40, 40, 40) # Dark Gray
+    pdf.set_text_color(40, 40, 40)
     pdf.cell(0, 10, f"Cheatsheet: {topic.title()}", 0, 1, 'C')
     pdf.ln(2)
-    # Add a line under the title
-    pdf.set_draw_color(200, 200, 200) # Light gray line
+    pdf.set_draw_color(200, 200, 200)
     pdf.line(pdf.get_x(), pdf.get_y(), pdf.get_x() + 180, pdf.get_y())
     pdf.ln(10)
 
     # --- Body Content ---
     line_height = 7
-    pdf.set_text_color(50, 50, 50) # Standard text color
+    pdf.set_text_color(50, 50, 50)
     for line in text_content.split('\n'):
         line = line.strip()
         if line.startswith('## '):
             pdf.set_font("DejaVu", "B", 14)
-            pdf.set_text_color(0, 80, 150) # A subtle blue for headings
+            pdf.set_text_color(0, 80, 150)
             pdf.multi_cell(0, line_height, line.replace('## ', ''), 0, 'L')
-            pdf.set_text_color(50, 50, 50) # Reset to standard color
+            pdf.set_text_color(50, 50, 50)
             pdf.ln(2)
         elif line.startswith('- '):
             pdf.set_font("DejaVu", "", 11)
-            pdf.set_x(20) # Indent list items
+            pdf.set_x(20)
             pdf.multi_cell(0, line_height, f"• {line.replace('- ', '')}")
             pdf.ln(1)
         else:
@@ -147,7 +147,7 @@ def handle_query_logic(query: str, session_id: str = None):
 # --- Streamlit UI (Unchanged) ---
 st.set_page_config(layout="centered")
 LIGHT = { "bg": "#f8fafb", "bar": "#fff", "bot": "#e9eef6", "user": "#d1e7dd", "text": "#191b22", "input": "#e8edf2", "border": "#d4dde7", "expander": "#f4f7fb" }
-DARK = { "bg": "#1818c", "bar": "#202126", "bot": "#232733", "user": "#22577a", "text": "#f3f5f8", "input": "#242730", "border": "#26282f", "expander": "#24272e" }
+DARK = { "bg": "#18181c", "bar": "#202126", "bot": "#232733", "user": "#22577a", "text": "#f3f5f8", "input": "#242730", "border": "#26282f", "expander": "#24272e" }
 if "theme" not in st.session_state: st.session_state["theme"] = "dark"
 if "chat_history" not in st.session_state: st.session_state["chat_history"] = []
 if "session_id" not in st.session_state: st.session_state["session_id"] = None
@@ -167,11 +167,11 @@ st.markdown(f"""
 col1, col2, col3 = st.columns([8, 1, 1])
 with col1: st.markdown("<div class='topbar-custom'>Ophthalmology AI Assistant</div>", unsafe_allow_html=True)
 with col2:
-    
-    if st.button("☀️", key="theme-sun", help="Switch to light mode"): st.session_state["theme"] = "light"; st.rerun()
-    if st.button("🌙", key="theme-moon", help="Switch to dark mode"): st.session_state["theme"] = "dark"; st.rerun()
-        
-top_bar()
+    if st.button("☀️", key="theme-sun", help="Switch to light mode", use_container_width=True):
+        st.session_state["theme"] = "light"; st.rerun()
+with col3:
+    if st.button("🌙", key="theme-moon", help="Switch to dark mode", use_container_width=True):
+        st.session_state["theme"] = "dark"; st.rerun()
 for entry in st.session_state.chat_history:
     if "user" in entry: st.markdown(f"<div class='msg-user'>{entry['user']}</div>", unsafe_allow_html=True)
     else:
