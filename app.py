@@ -30,6 +30,7 @@ def create_formatted_pdf(text_content: str, topic: str) -> str:
     pdf = FPDF()
     pdf.add_page()
     try:
+        # Assumes fonts are in the root directory
         pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
         pdf.add_font("DejaVu", "B", "DejaVuSans-Bold.ttf", uni=True)
     except RuntimeError:
@@ -104,8 +105,8 @@ def handle_query_logic(query: str, session_id: str = None):
     tools = [question_answer_tool, concept_explainer_tool, cheatsheet_generator_tool]
     
     # Step 3: Run the agent
-    prompt = hub.pull("hwchase17/react")
-    agent = create_react_agent(llm, tools, prompt)
+    react_prompt = hub.pull("hwchase17/react")
+    agent = create_react_agent(llm, tools, react_prompt)
     agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=False, handle_parsing_errors=True, return_intermediate_steps=True)
     response = agent_executor.invoke({"input": query})
     
@@ -126,7 +127,7 @@ def handle_query_logic(query: str, session_id: str = None):
 # --- Streamlit UI ---
 st.set_page_config(layout="centered")
 
-# --- Theme Dictionaries & Session State from api_front.py ---
+# --- Theme Dictionaries & Session State from original UI ---
 LIGHT = { "bg": "#f8fafb", "bar": "#fff", "bot": "#e9eef6", "user": "#d1e7dd", "text": "#191b22", "input": "#e8edf2", "border": "#d4dde7", "expander": "#f4f7fb" }
 DARK = { "bg": "#18181c", "bar": "#202126", "bot": "#232733", "user": "#22577a", "text": "#f3f5f8", "input": "#242730", "border": "#26282f", "expander": "#24272e" }
 
@@ -141,7 +142,7 @@ if "active_doc_name" not in st.session_state:
 
 THEME = DARK if st.session_state["theme"] == "dark" else LIGHT
 
-# --- Custom CSS Styling from api_front.py ---
+# --- Custom CSS Styling from original UI ---
 st.markdown(f"""
 <style>
     .stApp {{
@@ -173,10 +174,24 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# --- Top Bar and Theme Toggle ---
-st.title("Ophthalmology Learning Assistant")
+# --- Top Bar with Title and Theme Toggle ---
+def top_bar():
+    col1, col2 = st.columns([10, 1])
+    with col1:
+        st.title("Ophthalmology Learning Assistant")
+    with col2:
+        if st.session_state["theme"] == "dark":
+            if st.button("☀️", help="Switch to Light Mode", use_container_width=True):
+                st.session_state["theme"] = "light"
+                st.rerun()
+        else:
+            if st.button("🌙", help="Switch to Dark Mode", use_container_width=True):
+                st.session_state["theme"] = "dark"
+                st.rerun()
 
-# Sidebar for document upload
+top_bar()
+
+# --- Sidebar for document upload ---
 with st.sidebar:
     st.header("Upload Your Document")
     uploaded_file = st.file_uploader("Upload a PDF to ask questions about it", type="pdf")
@@ -205,24 +220,27 @@ with st.sidebar:
                 st.session_state["active_doc_name"] = uploaded_file.name
                 st.success(f"Processed '{uploaded_file.name}'")
     
+    st.divider()
+
     if st.session_state["active_doc_name"]:
         st.info(f"Active document: **{st.session_state['active_doc_name']}**")
     else:
         st.info("Using the default Ophthalmology knowledge base.")
 
-# Chat interface
+# --- Chat interface ---
 for message in st.session_state.chat_history:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
         if "pdf_filename" in message and message["pdf_filename"]:
             pdf_path = os.path.join(CHEATSHEET_PATH, message["pdf_filename"])
-            with open(pdf_path, "rb") as pdf_file:
-                st.download_button(
-                    label="Download Cheatsheet",
-                    data=pdf_file,
-                    file_name=message["pdf_filename"],
-                    mime='application/pdf'
-                )
+            if os.path.exists(pdf_path):
+                with open(pdf_path, "rb") as pdf_file:
+                    st.download_button(
+                        label="Download Cheatsheet",
+                        data=pdf_file,
+                        file_name=message["pdf_filename"],
+                        mime='application/pdf'
+                    )
 
 if prompt := st.chat_input("Ask a question, request a topic explanation, or ask for a cheat sheet..."):
     st.chat_message("user").markdown(prompt)
@@ -235,12 +253,13 @@ if prompt := st.chat_input("Ask a question, request a topic explanation, or ask 
             st.markdown(answer)
             if pdf_filename:
                 pdf_path = os.path.join(CHEATSHEET_PATH, pdf_filename)
-                with open(pdf_path, "rb") as pdf_file:
-                    st.download_button(
-                        label="Download Cheatsheet",
-                        data=pdf_file,
-                        file_name=pdf_filename,
-                        mime='application/pdf'
-                    )
+                if os.path.exists(pdf_path):
+                    with open(pdf_path, "rb") as pdf_file:
+                        st.download_button(
+                            label="Download Cheatsheet",
+                            data=pdf_file,
+                            file_name=pdf_filename,
+                            mime='application/pdf'
+                        )
         
         st.session_state.chat_history.append({"role": "assistant", "content": answer, "pdf_filename": pdf_filename})
