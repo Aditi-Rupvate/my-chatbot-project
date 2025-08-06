@@ -4,7 +4,7 @@ fastapi
 uvicorn
 langchain
 langchain-google-genai
-google-generative-ai
+google-generativeai
 fpdf
 fitz
 PyMuPDF
