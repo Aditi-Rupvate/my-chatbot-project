@@ -1,0 +1,13 @@
+streamlit
+requests
+fastapi
+uvicorn
+langchain
+langchain-google-genai
+google-generative-ai
+fpdf
+fitz
+PyMuPDF
+faiss-cpu
+speechrecognition
+PyAudio
