@@ -30,11 +30,9 @@ def create_formatted_pdf(text_content: str, topic: str) -> str:
     pdf = FPDF()
     pdf.add_page()
     try:
-        # Assumes fonts are in the root directory
         pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
         pdf.add_font("DejaVu", "B", "DejaVuSans-Bold.ttf", uni=True)
     except RuntimeError:
-        # FPDF raises RuntimeError if font file is not found
         st.error("Could not find 'DejaVuSans.ttf' or 'DejaVuSans-Bold.ttf'. Please ensure they are in the root folder.")
         return ""
 
@@ -64,29 +62,29 @@ def create_formatted_pdf(text_content: str, topic: str) -> str:
 
 # --- Main Query Logic (Integrated from api_rag.py) ---
 def handle_query_logic(query: str, session_id: str = None):
-    # Step 1: Select the correct retriever
+    # Step 1: Select retriever
     if session_id:
         temp_db_path = os.path.join(TEMP_STORAGE_PATH, session_id)
         if not os.path.exists(temp_db_path):
-            return "Error: Your document session has expired or is invalid. Please upload the document again.", None
+            return "Error: Your document session has expired. Please upload the document again.", None
         db = FAISS.load_local(temp_db_path, embeddings, allow_dangerous_deserialization=True)
     else:
         if not os.path.exists(FAISS_INDEX_PATH):
-             return "Error: The default knowledge base is not available. Please upload a document to begin.", None
+             return "Error: The default knowledge base is not available. Upload a document to begin.", None
         db = FAISS.load_local(FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
 
     retriever = db.as_retriever(search_type="similarity", search_kwargs={"k": 5})
 
-    # Step 2: Define the tools
+    # Step 2: Define tools
     @tool
     def question_answer_tool(query: str) -> str:
-        """Use this tool ONLY to answer a direct, specific question from the user."""
+        """Use for direct questions."""
         chain = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever)
         return chain.invoke(query)['result']
 
     @tool
     def concept_explainer_tool(topic: str) -> str:
-        """Use this tool ONLY when the user asks to be taught or for a detailed explanation of a topic."""
+        """Use for detailed topic explanations."""
         context = "\n\n".join([doc.page_content for doc in retriever.get_relevant_documents(topic)])
         prompt = PromptTemplate.from_template("Provide a comprehensive explanation of {topic}.\n\nContext: {context}\nLecture:")
         chain = LLMChain(llm=llm, prompt=prompt)
@@ -94,7 +92,7 @@ def handle_query_logic(query: str, session_id: str = None):
 
     @tool
     def cheatsheet_generator_tool(topic: str) -> str:
-        """Use this tool ONLY when the user asks for a cheat sheet, summary, or key points. This tool generates a well-formatted PDF."""
+        """Use for cheat sheets or summaries. Generates a PDF."""
         context = "\n\n".join([doc.page_content for doc in retriever.get_relevant_documents(topic)])
         prompt = PromptTemplate.from_template("Create a detailed cheat sheet for {topic} using '##' for headings and '-' for list items.\nContext: {context}\nCheat Sheet:")
         chain = LLMChain(llm=llm, prompt=prompt)
@@ -104,7 +102,7 @@ def handle_query_logic(query: str, session_id: str = None):
 
     tools = [question_answer_tool, concept_explainer_tool, cheatsheet_generator_tool]
     
-    # Step 3: Run the agent
+    # Step 3: Run agent
     react_prompt = hub.pull("hwchase17/react")
     agent = create_react_agent(llm, tools, react_prompt)
     agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=False, handle_parsing_errors=True, return_intermediate_steps=True)
@@ -113,21 +111,20 @@ def handle_query_logic(query: str, session_id: str = None):
     final_answer = response.get('output', "I couldn't find an answer.")
     pdf_filename = None
 
-    # Step 4: Process results for PDF
+    # Step 4: Extract PDF filename if generated
     if 'intermediate_steps' in response:
         for _, observation in response['intermediate_steps']:
             if isinstance(observation, str) and observation.startswith("PDF_GENERATED::"):
                 try:
-                    parts = observation.split("::")
-                    pdf_filename = parts[1]
+                    pdf_filename = observation.split("::")[1]
                 except IndexError:
                     pass
     return final_answer, pdf_filename
 
-# --- Streamlit UI (from api_front.py) ---
+# --- Streamlit UI (from your new api_front.py) ---
 st.set_page_config(layout="centered")
 
-# --- Theme Dictionaries & Session State from original UI ---
+# --- Theme Dictionaries & Session State ---
 LIGHT = { "bg": "#f8fafb", "bar": "#fff", "bot": "#e9eef6", "user": "#d1e7dd", "text": "#191b22", "input": "#e8edf2", "border": "#d4dde7", "expander": "#f4f7fb" }
 DARK = { "bg": "#18181c", "bar": "#202126", "bot": "#232733", "user": "#22577a", "text": "#f3f5f8", "input": "#242730", "border": "#26282f", "expander": "#24272e" }
 
@@ -142,56 +139,79 @@ if "active_doc_name" not in st.session_state:
 
 THEME = DARK if st.session_state["theme"] == "dark" else LIGHT
 
-# --- Custom CSS Styling from original UI ---
+# --- Custom CSS Styling (from your new api_front.py) ---
 st.markdown(f"""
 <style>
     .stApp {{
-        background-color: {THEME['bg']};
+        background: {THEME['bg']};
         color: {THEME['text']};
     }}
-    [data-testid="stSidebar"] {{
-        background-color: {THEME['bar']};
+    .topbar-custom {{
+        background: {THEME['bar']};
+        border-radius: 0 0 16px 16px;
+        padding: 1.3em 1.2em 1.15em 2.1em;
+        margin-bottom: 1.6em;
+        box-shadow: 0 2px 12px 0 rgba(44,46,66,0.06);
+        display: flex; align-items: center; justify-content: space-between;
+        font-size:1.55rem; font-weight: 800; letter-spacing:.02em;
     }}
-    .stChatMessage {{
-        background-color: {THEME['bot']};
-        border-radius: 0.5rem;
+    .msg-user {{
+        background: {THEME['user']}; color: {THEME['text']}; border-radius: 16px 16px 4px 20px;
+        margin-bottom: 0.3em; padding: 1em 1.35em; width: fit-content; max-width: 85%;
+        font-size: 1.13rem; border: 1.5px solid {THEME['border']}; margin-left: auto;
+        margin-right: 0; text-align: right; box-shadow: 0 1px 12px 0 rgba(55,96,148,0.05);
+        word-break: break-word;
     }}
-    div[data-testid="stChatMessage"][data-user-border-color] {{
-        background-color: {THEME['user']};
+    .msg-bot {{
+        background: {THEME['bot']}; color: {THEME['text']}; border-radius: 16px 16px 20px 4px;
+        margin-bottom: 0.7em; padding: 1.08em 1.23em 1em 1.18em; width: fit-content;
+        max-width: 85%; font-size: 1.13rem; border: 1.5px solid {THEME['border']};
+        margin-right: auto; margin-left: 0; text-align: left;
+        box-shadow: 0 1px 12px 0 rgba(44,46,66,0.05); word-break: break-word;
     }}
-    [data-testid="stChatInput"] {{
-        background-color: {THEME['bg']};
-    }}
-     [data-testid="stChatInput"] textarea {{
-        background-color: {THEME['input']};
-        color: {THEME['text']};
+    [data-testid="stExpander"] {{
+        border-color: {THEME['border']};
+        background: {THEME['expander']};
     }}
     .stButton>button, .stDownloadButton>button {{
         border: 1px solid {THEME['border']};
-        background-color: {THEME['input']};
-        color: {THEME['text']};
     }}
 </style>
 """, unsafe_allow_html=True)
 
-# --- Top Bar with Title and Theme Toggle (from original UI) ---
+# --- Top bar with theme buttons ---
 def top_bar():
-    col1, col2 = st.columns([10, 1])
+    col1, col2, col3 = st.columns([10, 1, 1])
     with col1:
-        st.title("Ophthalmology Learning Assistant")
-   if st.button("☀️", key="theme-sun", help="Switch to light mode"): st.session_state["theme"] = "light"; st.rerun()
-   if st.button("🌙", key="theme-moon", help="Switch to dark mode"): st.session_state["theme"] = "dark"; st.rerun()
-
+        st.markdown("<div class='topbar-custom' style='border-radius:16px;'>Ophthalmology AI Assistant</div>", unsafe_allow_html=True)
+    with col2:
+        if st.button("☀️", key="theme-sun", help="Switch to light mode", use_container_width=True):
+            st.session_state["theme"] = "light"
+            st.rerun()
+    with col3:
+        if st.button("🌙", key="theme-moon", help="Switch to dark mode", use_container_width=True):
+            st.session_state["theme"] = "dark"
+            st.rerun()
 top_bar()
 
-# --- Sidebar for document upload (integrating backend logic) ---
-with st.sidebar:
-    st.header("Upload Your Document")
+# --- Chat History Display ---
+for entry in st.session_state.chat_history:
+    if "user" in entry:
+        st.markdown(f"<div class='msg-user'>{entry['user']}</div>", unsafe_allow_html=True)
+    else:
+        st.markdown(f"<div class='msg-bot'>{entry['bot']}</div>", unsafe_allow_html=True)
+        if entry.get("pdf_filename"):
+            pdf_path = os.path.join(CHEATSHEET_PATH, entry["pdf_filename"])
+            if os.path.exists(pdf_path):
+                with open(pdf_path, "rb") as pdf_file:
+                    st.download_button("📥 Download Cheatsheet", pdf_file.read(), entry["pdf_filename"], "application/pdf")
+
+# --- Document Upload Expander (with integrated backend logic) ---
+with st.expander("Upload a Custom Document"):
     uploaded_file = st.file_uploader("Upload a PDF to ask questions about it", type="pdf")
-    
     if uploaded_file:
         if st.button("Process Document"):
-            with st.spinner("Processing document... This may take a moment."):
+            with st.spinner("Processing document..."):
                 # This logic is from the /upload endpoint in api_rag.py
                 session_id = str(uuid.uuid4())
                 temp_dir = os.path.join(TEMP_STORAGE_PATH, session_id)
@@ -213,52 +233,24 @@ with st.sidebar:
                 
                 st.session_state["session_id"] = session_id
                 st.session_state["active_doc_name"] = uploaded_file.name
-                st.session_state["chat_history"] = [] # Clear history for new doc
-                st.success(f"Processed '{uploaded_file.name}'")
-    
-    st.divider()
+                st.session_state.chat_history.append({"bot": f"Ready for questions about **{uploaded_file.name}**."})
+                st.rerun()
 
-    if st.session_state["active_doc_name"]:
-        st.info(f"Active document: **{st.session_state['active_doc_name']}**")
-    else:
-        st.info("Using the default Ophthalmology knowledge base.")
+# --- Active Document Status ---
+if st.session_state["active_doc_name"]:
+    st.info(f"Active Document: **{st.session_state['active_doc_name']}**")
+    if st.button("Clear Document & Revert to Default"):
+        st.session_state["session_id"] = None
+        st.session_state["active_doc_name"] = None
+        st.session_state.chat_history.append({"bot": "Reverted to default knowledge base."})
+        st.rerun()
 
-# --- Chat interface (integrating backend logic) ---
-for message in st.session_state.chat_history:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
-        if "pdf_filename" in message and message["pdf_filename"]:
-            pdf_path = os.path.join(CHEATSHEET_PATH, message["pdf_filename"])
-            if os.path.exists(pdf_path):
-                with open(pdf_path, "rb") as pdf_file:
-                    st.download_button(
-                        label="Download Cheatsheet",
-                        data=pdf_file,
-                        file_name=message["pdf_filename"],
-                        mime='application/pdf'
-                    )
-
-if prompt := st.chat_input("Ask a question, request a topic explanation, or ask for a cheat sheet..."):
-    st.chat_message("user").markdown(prompt)
-    st.session_state.chat_history.append({"role": "user", "content": prompt})
+# --- User Input & Logic (with integrated backend logic) ---
+if user_prompt := st.chat_input("Type your question here..."):
+    st.session_state.chat_history.append({"user": user_prompt})
     
     with st.spinner("Thinking..."):
-        # This logic is from the /query endpoint in api_rag.py
-        answer, pdf_filename = handle_query_logic(prompt, st.session_state.get("session_id"))
-        
-        with st.chat_message("assistant"):
-            st.markdown(answer)
-            if pdf_filename:
-                pdf_path = os.path.join(CHEATSHEET_PATH, pdf_filename)
-                if os.path.exists(pdf_path):
-                    with open(pdf_path, "rb") as pdf_file:
-                        st.download_button(
-                            label="Download Cheatsheet",
-                            data=pdf_file,
-                            file_name=pdf_filename,
-                            mime='application/pdf'
-                        )
-        
-        # Append the complete response, including pdf_filename for re-rendering
-        st.session_state.chat_history.append({"role": "assistant", "content": answer, "pdf_filename": pdf_filename})
-
+        # This logic replaces the /query API call
+        answer, pdf_filename = handle_query_logic(user_prompt, st.session_state.get("session_id"))
+        st.session_state.chat_history.append({"bot": answer, "pdf_filename": pdf_filename})
+    st.rerun()
