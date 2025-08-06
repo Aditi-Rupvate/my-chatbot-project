@@ -183,11 +183,9 @@ with main_container:
         # Nest columns for the buttons to keep them tight
         btn_col1, btn_col2 = st.columns(2)
         with btn_col1:
-            if st.button("☀️", key="theme-sun", help="Switch to light mode", use_container_width=True):
-                st.session_state["theme"] = "light"; st.rerun()
-        with btn_col2:
-            if st.button("🌙", key="theme-moon", help="Switch to dark mode", use_container_width=True):
-                st.session_state["theme"] = "dark"; st.rerun()
+            if st.button("☀️", key="theme-sun", help="Switch to light mode"): st.session_state["theme"] = "light"; st.rerun()
+            if st.button("🌙", key="theme-moon", help="Switch to dark mode"): st.session_state["theme"] = "dark"; st.rerun()
+
 
 st.markdown("---") # Visual separator
 
